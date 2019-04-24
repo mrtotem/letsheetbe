@@ -1,14 +1,12 @@
 package com.mrtotem.letsheetbe;
 
-import android.os.Handler;
 import android.util.Log;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 
 import be.tarsos.dsp.AudioDispatcher;
@@ -34,7 +32,7 @@ class AudioProcessorManager {
     /**
      * BUFFER_SIZE
      */
-    private static final float PITCH_TOLERANCE = 10;
+    private static final float PITCH_TOLERANCE = 4;
     /**
      * note keys
      */
@@ -92,59 +90,82 @@ class AudioProcessorManager {
      */
     private NewThreadWorker audioThreadWorker = new NewThreadWorker(Thread::new);
     /**
-     *
+     * Note pitch
      */
     private Float pitch = -1f;
     /**
-     * detectedNotes
+     * Tap tempo selected
+     * 300 millis by default
      */
-    private final List<String> detectedNotes = new ArrayList<>();
-
+    private Float tapTempo = 300f;
     /**
      * notesFrequencies
      */
     private final static Map<Integer, Set<Float>> frequencies = new HashMap<>();
-
     /**
      * NotesThreadWorker
      */
-    private Thread cNoteThreadWorker;
-    private Thread aNoteThreadWorker;
+    private Thread cNoteThread;
+    private Thread aNoteThread;
+    /**
+     * concurred map with detected notes
+     */
+    private volatile ConcurrentHashMap<Integer, Long> detectedNotes = new ConcurrentHashMap<>();
 
-    private Runnable cRunnable = () -> Objects.requireNonNull(frequencies.get(C)).stream()
-            .filter(c -> c - PITCH_TOLERANCE < pitch &&
-                    c + PITCH_TOLERANCE > pitch)
-            .forEach(s -> {
-                Log.d("PITCH", "is writing? " + flagC);
-                synchronized (cNoteThreadWorker) {
-                    try {
-                        Log.d("PITCH", "It's a C!!");
-                        detectedNotes.add("C");
-                        audioProcessorService.onNewNoteDetected(detectedNotes);
-                        cNoteThreadWorker.wait(500);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-            });
+    private Runnable cRunnable = () -> {
+        boolean found = Objects.requireNonNull(frequencies.get(C)).stream().anyMatch(note ->
+                note - PITCH_TOLERANCE < pitch &&
+                        note + PITCH_TOLERANCE > pitch);
+        if (found) {
+            if (!detectedNotes.isEmpty()) {
+                int lastElement = 0;
 
-    private Runnable aRunnable = () -> Objects.requireNonNull(frequencies.get(A)).stream()
-            .filter(a -> a - PITCH_TOLERANCE < pitch &&
-                    a + PITCH_TOLERANCE > pitch)
-            .forEach(s -> {
-                Log.d("PITCH", "is writing? " + flagA);
-                if (flagA) {
-                    Log.d("PITCH", "It's an A!!");
-                    detectedNotes.add("A");
-                    audioProcessorService.onNewNoteDetected(detectedNotes);
-                    stopWriting(A);
+                for (Integer key : detectedNotes.keySet()) {
+                    lastElement = key;
                 }
-            });
+
+                audioProcessorService.onNewNoteDetected(
+                        new Note(
+                                lastElement,
+                                tapTempo,
+                                detectedNotes.get(lastElement),
+                                System.currentTimeMillis())
+                );
+            }
+            detectedNotes.put(C, System.currentTimeMillis());
+            Log.d(AudioProcessorManager.class.getName(), detectedNotes.toString());
+        }
+    };
+
+    private Runnable aRunnable = () -> {
+        boolean found = Objects.requireNonNull(frequencies.get(A)).stream().anyMatch(note ->
+                note - PITCH_TOLERANCE < pitch &&
+                        note + PITCH_TOLERANCE > pitch);
+        if (found) {
+            if (!detectedNotes.isEmpty()) {
+                int lastElement = 0;
+
+                for (Integer key : detectedNotes.keySet()) {
+                    lastElement = key;
+                }
+
+                audioProcessorService.onNewNoteDetected(
+                        new Note(
+                                lastElement,
+                                tapTempo,
+                                detectedNotes.get(lastElement),
+                                System.currentTimeMillis())
+                );
+            }
+            detectedNotes.put(A, System.currentTimeMillis());
+            Log.d(AudioProcessorManager.class.getName(), detectedNotes.toString());
+        }
+    };
 
     private AudioProcessorManager() {
     }
 
-    public static AudioProcessorManager getInstance() {
+    static AudioProcessorManager getInstance() {
         if (instance == null) {
             instance = new AudioProcessorManager();
             fillNotesFrequenciesTable();
@@ -159,15 +180,15 @@ class AudioProcessorManager {
         frequencies.put(C, cFreq);
 
         Set<Float> aFreq = new ConcurrentSkipListSet<>();
+        aFreq.add(220f);
         aFreq.add(440f);
-        aFreq.add(880f);
         frequencies.put(A, aFreq);
     }
 
     void startAudioCapture(AudioProcessorService listener) {
         audioProcessorService = Objects.requireNonNull(listener);
-        cNoteThreadWorker = new Thread(cRunnable);
-        aNoteThreadWorker = new Thread(aRunnable);
+        cNoteThread = new Thread(cRunnable);
+        aNoteThread = new Thread(aRunnable);
         audioDispatcher.addAudioProcessor(audioProcessor);
         audioThreadWorker.schedule(() -> audioDispatcher.run());
     }
@@ -180,36 +201,18 @@ class AudioProcessorManager {
 
     private void processAudioResource(PitchDetectionResult pitchDetectionResult, AudioEvent audioEvent) {
         pitch = pitchDetectionResult.getPitch();
-        findNote();
+        //Log.d(AudioProcessorManager.class.getName(), String.valueOf(pitch));
+        // starts note process behavior.
+        // calculates the duration of the note and the note itself.
+        processNote();
     }
 
-    private void findNote() {
-        cNoteThreadWorker.run();
-        aNoteThreadWorker.run();
+    private void processNote() {
+        cNoteThread.run();
+        aNoteThread.run();
     }
 
-    private void stopWriting(int key) {
-        switch (key) {
-            case C: {
-                flagC = false;
-                new Handler().postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        flagC = true;
-                        cNoteThreadWorker.notifyAll();
-                    }
-                }, 500);
-            }
-            break;
-            case A: {
-                flagA = false;
-                try {
-                    new Thread(() -> flagA = true).join(500);
-                } catch (InterruptedException e) {
-                    Log.e(AudioProcessorManager.class.getName(), e.getMessage());
-                }
-            }
-            break;
-        }
+    void setTapTempo(Float tapTempo) {
+        this.tapTempo = tapTempo;
     }
 }

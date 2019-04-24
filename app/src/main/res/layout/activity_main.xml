@@ -31,6 +31,18 @@
         android:textColor="@android:color/black" />
 
     <Button
+        android:id="@+id/tap_tempo_button"
+        style="@style/Widget.AppCompat.Button.Borderless.Colored"
+        android:layout_width="100dp"
+        android:layout_height="50dp"
+        android:layout_below="@id/notes_sheet"
+        android:layout_marginLeft="5dp"
+        android:layout_toRightOf="@id/start_listening_button"
+        android:background="@color/colorPrimary"
+        android:text="TAP TEMPO"
+        android:textColor="@android:color/black" />
+
+    <Button
         android:id="@+id/end_listening_button"
         style="@style/Widget.AppCompat.Button.Borderless.Colored"
         android:layout_width="100dp"
@@ -40,5 +52,18 @@
         android:layout_marginTop="5dp"
         android:background="@color/colorPrimary"
         android:text="Stop!!"
+        android:textColor="@android:color/black" />
+
+    <TextView
+        android:id="@+id/tap_tempo_label"
+        android:layout_width="100dp"
+        android:layout_height="50dp"
+        android:layout_below="@id/tap_tempo_button"
+        android:layout_marginLeft="5dp"
+        android:layout_marginTop="10dp"
+        android:layout_toRightOf="@id/end_listening_button"
+        android:background="@color/colorPrimary"
+        android:gravity="center"
+        android:padding="5dp"
         android:textColor="@android:color/black" />
 </RelativeLayout>
